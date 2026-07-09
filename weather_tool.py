@@ -117,10 +117,64 @@ def lookup_weather(location: str, timeframe: str = "today") -> dict[str, Any]:
     }
 
 
+def get_hourly_forecast(location: str, date: str) -> dict[str, Any]:
+    """Hour-by-hour forecast for ONE specific date (daytime hours only).
+
+    Meant to be called after `lookup_weather` has revealed which day is worth
+    drilling into -- the `date` is chosen by reasoning over the daily summary.
+    """
+    coordinates = geocode_location(location)
+    response = requests.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": coordinates["latitude"],
+            "longitude": coordinates["longitude"],
+            "hourly": "temperature_2m,apparent_temperature,precipitation_probability,uv_index",
+            "timezone": "auto",
+            "start_date": date,
+            "end_date": date,
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+    hourly = response.json().get("hourly", {})
+
+    times = hourly.get("time", [])
+    hours = []
+    for index, timestamp in enumerate(times):
+        hour = int(timestamp[11:13])
+        if hour < 6 or hour > 21:  # skip the night, keep the response compact
+            continue
+        hours.append(
+            {
+                "time": timestamp[11:16],
+                "temp_c": hourly.get("temperature_2m", [None])[index],
+                "feels_like_c": hourly.get("apparent_temperature", [None])[index],
+                "rain_prob": hourly.get("precipitation_probability", [None])[index],
+                "uv_index": hourly.get("uv_index", [None])[index],
+            }
+        )
+
+    return {
+        "location": coordinates["name"],
+        "date": date,
+        "hourly": hours,
+        "provider": "Open-Meteo",
+    }
+
+
 def weather_tool(tool_input: dict[str, Any]) -> dict[str, Any]:
     location = tool_input.get("location", "Beijing")
     timeframe = tool_input.get("timeframe", "today")
     return lookup_weather(location, timeframe)
+
+
+def hourly_forecast_tool(tool_input: dict[str, Any]) -> dict[str, Any]:
+    location = tool_input.get("location", "Beijing")
+    date = tool_input.get("date")
+    if not date:
+        raise ValueError("`date` is required, format YYYY-MM-DD")
+    return get_hourly_forecast(location, date)
 
 
 if __name__ == "__main__":
